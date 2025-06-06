@@ -12,6 +12,7 @@ public class system {
     private static JPasswordField passField; // 密码输入框
     private static JTextField dbField; // 新增数据库名称输入框
     private static JLabel statusLabel; // 状态显示标签
+    private static JFrame loginFrame; // 登录窗口引用
 
     public static void main(String[] args) {
         // 在事件调度线程中创建GUI
@@ -25,8 +26,8 @@ public class system {
 
     private static void createAndShowGUI() {
         // 创建主窗口框架
-        JFrame frame = new JFrame("MySQL数据库连接工具");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // 关闭时退出程序
+        loginFrame = new JFrame("MySQL数据库连接工具");
+        loginFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // 关闭时退出程序
 
         // 创建主面板，使用GridBagLayout布局管理器
         JPanel mainPanel = new JPanel(new GridBagLayout()); // 使用灵活布局的面板
@@ -125,16 +126,16 @@ public class system {
         gbc.anchor = GridBagConstraints.WEST;
 
         // 将主面板添加到窗口
-        frame.setContentPane(mainPanel);
+        loginFrame.setContentPane(mainPanel);
 
         // 设置窗口大小为800x600
-        frame.setSize(800, 600);
+        loginFrame.setSize(800, 600);
 
         // 窗口居中显示
-        frame.setLocationRelativeTo(null);
+        loginFrame.setLocationRelativeTo(null);
 
         // 显示窗口
-        frame.setVisible(true);
+        loginFrame.setVisible(true);
     }
 
     /**
@@ -224,6 +225,10 @@ public class system {
                     if (get()) {
                         statusLabel.setText("成功连接到数据库 '" + dbName + "'！");
                         statusLabel.setForeground(new Color(0, 150, 0)); // 绿色
+
+                        // 连接成功后打开主功能界面
+                        showMainApplication();
+                        loginFrame.dispose(); // 关闭登录窗口
                     } else {
                         statusLabel.setForeground(Color.RED);
                     }
@@ -235,5 +240,113 @@ public class system {
         };
 
         worker.execute(); // 启动后台任务
+    }
+
+    /**
+     * 显示主应用程序界面
+     */
+    private static void showMainApplication() {
+        // 创建主应用程序窗口
+        JFrame mainFrame = new JFrame("学生信息管理系统");
+        mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        mainFrame.setSize(900, 650);
+        mainFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBackground(new Color(245, 245, 245));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        // ================== 顶部标题面板 ==================
+        JPanel headerPanel = new JPanel();
+        headerPanel.setBackground(new Color(70, 130, 180));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
+
+        JLabel titleLabel = new JLabel("学生信息管理系统");
+        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 28));
+        titleLabel.setForeground(Color.WHITE);
+        headerPanel.add(titleLabel);
+
+        mainPanel.add(headerPanel, BorderLayout.NORTH);
+
+        // ================== 功能按钮面板 ==================
+        JPanel functionPanel = new JPanel(new GridLayout(3, 2, 20, 20));
+        functionPanel.setBorder(BorderFactory.createEmptyBorder(40, 40, 40, 40));
+        functionPanel.setBackground(new Color(245, 245, 245));
+
+        // 添加数据按钮
+        JButton addButton = createFunctionButton("添加数据", new Color(46, 204, 113));
+        functionPanel.add(addButton);
+
+        // 显示数据按钮
+        JButton displayButton = createFunctionButton("显示数据", new Color(52, 152, 219));
+        functionPanel.add(displayButton);
+
+        // 修改数据按钮
+        JButton editButton = createFunctionButton("修改数据", new Color(155, 89, 182));
+        functionPanel.add(editButton);
+
+        // 查询数据按钮
+        JButton searchButton = createFunctionButton("查询数据", new Color(241, 196, 15));
+        functionPanel.add(searchButton);
+
+        // 统计学分按钮
+        JButton statsButton = createFunctionButton("统计学分", new Color(230, 126, 34));
+        functionPanel.add(statsButton);
+
+        // 预留位置
+        functionPanel.add(new JLabel()); // 空白占位
+
+        mainPanel.add(functionPanel, BorderLayout.CENTER);
+
+        // ================== 底部状态栏 ==================
+        JPanel footerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        footerPanel.setBackground(new Color(220, 220, 220));
+        footerPanel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, Color.GRAY));
+
+        JLabel statusLabel = new JLabel("就绪 | 数据库: " + dbField.getText());
+        statusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        statusLabel.setForeground(new Color(80, 80, 80));
+        footerPanel.add(statusLabel);
+
+        mainPanel.add(footerPanel, BorderLayout.SOUTH);
+
+        // 设置主窗口内容
+        mainFrame.setContentPane(mainPanel);
+        mainFrame.setVisible(true);
+    }
+
+    /**
+     * 创建功能按钮
+     */
+    private static JButton createFunctionButton(String text, Color color) {
+        JButton button = new JButton(text);
+        button.setFont(new Font("微软雅黑", Font.BOLD, 20));
+        button.setBackground(color);
+        button.setForeground(Color.WHITE);
+        button.setFocusPainted(false);
+        button.setPreferredSize(new Dimension(200, 100));
+        button.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 添加悬停效果
+        button.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                button.setBackground(color.darker());
+            }
+
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                button.setBackground(color);
+            }
+        });
+
+        // 添加点击事件（暂时只显示消息）
+        button.addActionListener(e -> {
+            JOptionPane.showMessageDialog(null,
+                    "【" + text + "】功能正在开发中...",
+                    "功能提示",
+                    JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        return button;
     }
 }
