@@ -21,7 +21,7 @@ public class system {
     private static String savedUsername;
     private static String savedPassword;
     private static String savedJdbcUrl;
-    private static String savedDriver = "com.mysql.cj.jdbc.Driver";
+    private static final String savedDriver = "com.mysql.cj.jdbc.Driver";
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(new Runnable() {
@@ -257,8 +257,6 @@ public class system {
 
         // 显示数据按钮
         JButton displayButton = createFunctionButton("显示数据", new Color(52, 152, 219));
-        // 添加事件监听器
-        displayButton.addActionListener(e -> showTableData());
         functionPanel.add(displayButton);
 
         // 修改数据按钮
@@ -270,7 +268,7 @@ public class system {
         functionPanel.add(searchButton);
 
         // 统计学分按钮
-        JButton statsButton = createFunctionButton("统计学分", new Color(230, 126, 34));
+        JButton statsButton = createFunctionButton("查询学分", new Color(230, 126, 34));
         functionPanel.add(statsButton);
 
         // 预留位置
@@ -318,7 +316,15 @@ public class system {
 
         // 添加点击事件
         button.addActionListener(e -> {
-            if (!text.equals("显示数据")) {
+            if (text.equals("显示数据")) {
+                showTableData();
+            } else if (text.equals("添加数据")) {
+                addDataToTable();
+            }
+             else if (text.equals("查询学分")) {
+                    queryCredits();
+            }
+            else {
                 JOptionPane.showMessageDialog(null,
                         "【" + text + "】功能正在开发中...",
                         "功能提示",
@@ -327,6 +333,205 @@ public class system {
         });
 
         return button;
+    }
+
+    /**
+     * 新增方法：查询学生学分信息
+     */
+    private static void queryCredits() {
+        // 检查是否已连接数据库
+        if (savedDbName == null || savedDbName.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "尚未连接到数据库，请先连接！",
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 获取用户输入的学号
+        String studentId = JOptionPane.showInputDialog(null,
+                "请输入学生学号：",
+                "学分查询",
+                JOptionPane.QUESTION_MESSAGE);
+
+        // 验证输入
+        if (studentId == null) {
+            return; // 用户取消输入
+        }
+        studentId = studentId.trim();
+        if (studentId.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "学号不能为空！",
+                    "输入错误",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // 创建进度对话框
+        final JDialog progressDialog = new JDialog((JFrame) null, "正在查询", true);
+        JPanel progressPanel = new JPanel(new BorderLayout());
+        progressPanel.add(new JLabel("正在查询学号: " + studentId + " 的学分信息...", SwingConstants.CENTER), BorderLayout.CENTER);
+        progressPanel.setBorder(BorderFactory.createEmptyBorder(20, 50, 20, 50));
+        progressDialog.add(progressPanel);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(null);
+        progressDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        // 使用SwingWorker在后台执行查询
+        String finalStudentId = studentId;
+        SwingWorker<Vector<Vector<Object>>, Void> worker = new SwingWorker<Vector<Vector<Object>>, Void>() {
+            @Override
+            protected Vector<Vector<Object>> doInBackground() throws Exception {
+                Vector<Vector<Object>> data = new Vector<>();
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+                    // 查询学生基本信息
+                    String baseInfoQuery = "SELECT 姓名 FROM 基本信息 WHERE 学号 = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(baseInfoQuery)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            if (!rs.next()) {
+                                JOptionPane.showMessageDialog(null,
+                                        "找不到学号为 '" + finalStudentId + "' 的学生！",
+                                        "查询错误",
+                                        JOptionPane.ERROR_MESSAGE);
+                                return null;
+                            }
+                        }
+                    }
+
+                    // 查询学分详细信息
+                    String query = "SELECT " +
+                            "s.学号, " +
+                            "s.姓名, " +
+                            "c.课程名称, " +
+                            "sc.成绩, " +
+                            "sc.补考成绩, " +
+                            "sc.重修成绩, " +
+                            "sc.绩点, " +
+                            "sc.学分 " +
+                            "FROM 成绩表 sc " +
+                            "JOIN 基本信息 s ON sc.学号 = s.学号 " +
+                            "JOIN 课程表 c ON sc.课程编号 = c.课程编号 " +
+                            "WHERE sc.学号 = ?";
+
+                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                row.add(rs.getString("学号"));
+                                row.add(rs.getString("姓名"));
+                                row.add(rs.getString("课程名称"));
+                                row.add(rs.getInt("成绩"));
+
+                                int makeUpScore = rs.getInt("补考成绩");
+                                row.add(rs.wasNull() ? "无" : makeUpScore);
+
+                                int retakeScore = rs.getInt("重修成绩");
+                                row.add(rs.wasNull() ? "无" : retakeScore);
+
+                                row.add(rs.getFloat("绩点"));
+                                row.add(rs.getFloat("学分"));
+
+                                data.add(row);
+                            }
+                        }
+                    }
+
+                    // 如果没有查询到学分信息
+                    if (data.isEmpty()) {
+                        JOptionPane.showMessageDialog(null,
+                                "学号 '" + finalStudentId + "' 没有学分记录！",
+                                "查询结果",
+                                JOptionPane.INFORMATION_MESSAGE);
+                        return null;
+                    }
+
+                    return data;
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(null,
+                            "数据库查询错误: " + ex.getMessage(),
+                            "数据库错误",
+                            JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose(); // 关闭进度对话框
+                try {
+                    Vector<Vector<Object>> data = get();
+                    if (data != null) {
+                        showCreditsResult(data);
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+
+    /**
+     * 显示学分查询结果
+     */
+    private static void showCreditsResult(Vector<Vector<Object>> data) {
+        // 创建结果窗口
+        JFrame resultFrame = new JFrame("学分查询结果");
+        resultFrame.setSize(900, 600);
+        resultFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 创建列名
+        Vector<String> columnNames = new Vector<>();
+        columnNames.add("学号");
+        columnNames.add("姓名");
+        columnNames.add("课程名称");
+        columnNames.add("成绩");
+        columnNames.add("补考成绩");
+        columnNames.add("重修成绩");
+        columnNames.add("绩点");
+        columnNames.add("学分");
+
+        // 创建表格
+        DefaultTableModel model = new DefaultTableModel(data, columnNames);
+        JTable table = new JTable(model);
+        table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        table.setRowHeight(25);
+
+        // 添加排序功能
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(model);
+        table.setRowSorter(sorter);
+
+        // 添加滚动面板
+        JScrollPane scrollPane = new JScrollPane(table);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // 添加底部信息面板
+        JPanel infoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 计算总学分
+        float totalCredits = 0;
+        for (Vector<Object> row : data) {
+            totalCredits += (Float) row.get(7);
+        }
+
+        JLabel infoLabel = new JLabel("总学分: " + totalCredits);
+        infoLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
+        infoLabel.setForeground(new Color(0, 100, 0));
+        infoPanel.add(infoLabel);
+
+        mainPanel.add(infoPanel, BorderLayout.SOUTH);
+
+        resultFrame.add(mainPanel);
+        resultFrame.setVisible(true);
     }
 
     /**
@@ -477,5 +682,253 @@ public class system {
         };
 
         worker.execute();
+    }
+
+    /**
+     * 新增方法：添加数据到表
+     */
+    private static void addDataToTable() {
+        // 检查是否已连接数据库
+        if (savedDbName == null || savedDbName.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "尚未连接到数据库，请先连接！",
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 获取数据库表名列表
+        Vector<String> tableNames = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            try (ResultSet tables = metaData.getTables(savedDbName, null, "%", new String[]{"TABLE"})) {
+                while (tables.next()) {
+                    tableNames.add(tables.getString("TABLE_NAME"));
+                }
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "获取表列表失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 检查是否有表
+        if (tableNames.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "数据库 '" + savedDbName + "' 中没有找到任何表！",
+                    "数据库错误",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 创建表选择对话框
+        JComboBox<String> tableComboBox = new JComboBox<>(tableNames);
+        JPanel panel = new JPanel(new GridLayout(0, 1));
+        panel.add(new JLabel("请选择要添加数据的表:"));
+        panel.add(tableComboBox);
+
+        int result = JOptionPane.showConfirmDialog(null, panel,
+                "选择表", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        String selectedTable = (String) tableComboBox.getSelectedItem();
+        createAddDataForm(selectedTable);
+    }
+
+    /**
+     * 新增方法：创建添加数据的表单
+     */
+    private static void createAddDataForm(String tableName) {
+        JFrame addFrame = new JFrame("添加数据到表: " + tableName);
+        addFrame.setSize(600, 500);
+        addFrame.setLocationRelativeTo(null);
+
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 添加标题
+        JLabel titleLabel = new JLabel("添加新记录到: " + tableName);
+        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 18));
+        mainPanel.add(titleLabel, BorderLayout.NORTH);
+
+        // 创建表单面板
+        JPanel formPanel = new JPanel(new GridBagLayout());
+        formPanel.setBorder(BorderFactory.createTitledBorder("请输入数据"));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        // 获取表结构
+        Vector<JLabel> labels = new Vector<>();
+        Vector<JTextField> fields = new Vector<>();
+        Vector<Boolean> isPrimaryKey = new Vector<>();
+        Vector<Boolean> isNullable = new Vector<>();
+
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+
+            // 获取主键信息
+            Vector<String> primaryKeys = new Vector<>();
+            try (ResultSet pkResult = metaData.getPrimaryKeys(null, null, tableName)) {
+                while (pkResult.next()) {
+                    primaryKeys.add(pkResult.getString("COLUMN_NAME"));
+                }
+            }
+
+            // 获取列信息
+            try (ResultSet columns = metaData.getColumns(null, null, tableName, null)) {
+                int row = 0;
+                while (columns.next()) {
+                    String columnName = columns.getString("COLUMN_NAME");
+                    String typeName = columns.getString("TYPE_NAME");
+                    int isNullableInt = columns.getInt("NULLABLE");
+
+                    // 创建标签
+                    JLabel label = new JLabel(columnName + " (" + typeName + "):");
+                    labels.add(label);
+
+                    // 创建输入框
+                    JTextField field = new JTextField(20);
+                    fields.add(field);
+
+                    // 检查是否主键
+                    boolean isPK = primaryKeys.contains(columnName);
+                    isPrimaryKey.add(isPK);
+
+                    // 检查是否可为空
+                    boolean nullable = (isNullableInt == DatabaseMetaData.columnNullable);
+                    isNullable.add(nullable);
+
+                    // 如果是主键，添加星号标记
+                    if (isPK) {
+                        label.setText("* " + label.getText() + " (主键)");
+                        label.setForeground(Color.BLUE);
+                    } else if (!nullable) {
+                        label.setText("* " + label.getText() + " (必填)");
+                    }
+
+                    // 添加到面板
+                    gbc.gridx = 0;
+                    gbc.gridy = row;
+                    formPanel.add(label, gbc);
+
+                    gbc.gridx = 1;
+                    formPanel.add(field, gbc);
+
+                    row++;
+                }
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "获取表结构失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 添加表单滚动面板
+        JScrollPane formScroll = new JScrollPane(formPanel);
+        mainPanel.add(formScroll, BorderLayout.CENTER);
+
+        // 添加按钮面板
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 10));
+        JButton submitButton = new JButton("提交");
+        submitButton.setFont(new Font("微软雅黑", Font.BOLD, 16));
+        submitButton.setPreferredSize(new Dimension(120, 40));
+
+        JButton cancelButton = new JButton("取消");
+        cancelButton.setFont(new Font("微软雅黑", Font.BOLD, 16));
+        cancelButton.setPreferredSize(new Dimension(120, 40));
+
+        buttonPanel.add(submitButton);
+        buttonPanel.add(cancelButton);
+        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        // 提交按钮事件
+        submitButton.addActionListener(e -> {
+            try {
+                if (insertData(tableName, fields, labels, isPrimaryKey, isNullable)) {
+                    JOptionPane.showMessageDialog(addFrame,
+                            "数据添加成功！",
+                            "成功",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    addFrame.dispose();
+                }
+            } catch (SQLException ex) {
+                JOptionPane.showMessageDialog(addFrame,
+                        "添加失败: " + ex.getMessage(),
+                        "数据库错误",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        // 取消按钮事件
+        cancelButton.addActionListener(e -> addFrame.dispose());
+
+        addFrame.add(mainPanel);
+        addFrame.setVisible(true);
+    }
+
+    /**
+     * 新增方法：执行数据插入
+     */
+    private static boolean insertData(String tableName, Vector<JTextField> fields,
+                                      Vector<JLabel> labels, Vector<Boolean> isPrimaryKey,
+                                      Vector<Boolean> isNullable) throws SQLException {
+        // 验证必填字段
+        for (int i = 0; i < fields.size(); i++) {
+            if (!isNullable.get(i) && fields.get(i).getText().trim().isEmpty()) {
+                JOptionPane.showMessageDialog(null,
+                        "字段 '" + labels.get(i).getText().replaceAll("\\*| \\(.*\\)", "") +
+                                "' 是必填字段！",
+                        "验证错误",
+                        JOptionPane.WARNING_MESSAGE);
+                fields.get(i).requestFocus();
+                return false;
+            }
+        }
+
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+            // 构建INSERT语句
+            StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " (");
+            StringBuilder values = new StringBuilder(" VALUES (");
+
+            for (int i = 0; i < labels.size(); i++) {
+                String fieldName = labels.get(i).getText()
+                        .replaceAll("\\*| \\(.*\\)|:", "").trim();
+
+                sql.append(fieldName);
+                values.append("?");
+
+                if (i < labels.size() - 1) {
+                    sql.append(", ");
+                    values.append(", ");
+                }
+            }
+
+            sql.append(")").append(values).append(")");
+
+            // 准备语句
+            try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+                // 设置参数
+                for (int i = 0; i < fields.size(); i++) {
+                    String value = fields.get(i).getText().trim();
+                    if (value.isEmpty()) {
+                        pstmt.setNull(i + 1, Types.NULL);
+                    } else {
+                        pstmt.setString(i + 1, value);
+                    }
+                }
+
+                // 执行插入
+                int rowsAffected = pstmt.executeUpdate();
+                return rowsAffected > 0;
+            }
+        }
     }
 }
