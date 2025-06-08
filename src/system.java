@@ -514,24 +514,97 @@ public class system {
         mainPanel.add(scrollPane, BorderLayout.CENTER);
 
         // 添加底部信息面板
-        JPanel infoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel infoPanel = new JPanel(new GridLayout(1, 3, 20, 10));
         infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        infoPanel.setBackground(new Color(240, 240, 240));
 
-        // 计算总学分
+        // 计算统计信息
         float totalCredits = 0;
+        float totalEffectiveScores = 0;  // 改为计算有效成绩总和
+        int courseCount = 0;
+
         for (Vector<Object> row : data) {
-            totalCredits += (Float) row.get(7);
+            Object scoreObj = row.get(3);     // 成绩
+            Object makeUpObj = row.get(4);    // 补考成绩
+            Object retakeObj = row.get(5);    // 重修成绩
+            Object creditObj = row.get(7);    // 学分
+
+            if (creditObj instanceof Number) {
+                float credit = ((Number) creditObj).floatValue();
+                totalCredits += credit;
+
+                // 计算有效成绩：取三个成绩中的最大值
+                float effectiveScore = 0;
+                boolean hasScore = false;
+
+                // 处理原始成绩
+                if (scoreObj instanceof Number) {
+                    float score = ((Number) scoreObj).floatValue();
+                    effectiveScore = Math.max(effectiveScore, score);
+                    hasScore = true;
+                }
+
+                // 处理补考成绩
+                if (makeUpObj instanceof Number) {
+                    float makeUp = ((Number) makeUpObj).floatValue();
+                    effectiveScore = Math.max(effectiveScore, makeUp);
+                    hasScore = true;
+                } else if ("无".equals(makeUpObj) && hasScore) {
+                    // 保留当前有效成绩
+                }
+
+                // 处理重修成绩
+                if (retakeObj instanceof Number) {
+                    float retake = ((Number) retakeObj).floatValue();
+                    effectiveScore = Math.max(effectiveScore, retake);
+                    hasScore = true;
+                } else if ("无".equals(retakeObj) && hasScore) {
+                    // 保留当前有效成绩
+                }
+
+                // 如果有有效成绩，则计入统计
+                if (hasScore) {
+                    totalEffectiveScores += effectiveScore;
+                    courseCount++;
+                }
+            }
         }
 
-        JLabel infoLabel = new JLabel("总学分: " + totalCredits);
-        infoLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
-        infoLabel.setForeground(new Color(0, 100, 0));
-        infoPanel.add(infoLabel);
+        // 计算平均值
+        float avgCredits = courseCount > 0 ? totalCredits / courseCount : 0;
+        float avgScores = courseCount > 0 ? totalEffectiveScores / courseCount : 0; // 使用有效成绩计算平均值
+        // 创建信息标签
+        JLabel totalLabel = createInfoLabel("总学分: " + String.format("%.2f", totalCredits),
+                new Color(0, 100, 0));
+        JLabel avgCreditLabel = createInfoLabel("平均学分: " + String.format("%.2f", avgCredits),
+                new Color(52, 152, 219));
+        JLabel avgScoreLabel = createInfoLabel("平均成绩: " + String.format("%.2f", avgScores),
+                new Color(155, 89, 182));
+
+        infoPanel.add(totalLabel);
+        infoPanel.add(avgCreditLabel);
+        infoPanel.add(avgScoreLabel);
 
         mainPanel.add(infoPanel, BorderLayout.SOUTH);
 
         resultFrame.add(mainPanel);
         resultFrame.setVisible(true);
+    }
+
+    /**
+     * 创建信息标签
+     */
+    private static JLabel createInfoLabel(String text, Color color) {
+        JLabel label = new JLabel(text, SwingConstants.CENTER);
+        label.setFont(new Font("微软雅黑", Font.BOLD, 16));
+        label.setForeground(color);
+        label.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(color, 1),
+                BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        ));
+        label.setOpaque(true);
+        label.setBackground(new Color(255, 255, 255, 200));
+        return label;
     }
 
     /**
