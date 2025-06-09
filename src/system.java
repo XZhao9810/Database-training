@@ -6,6 +6,8 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.sql.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Vector;
 
 public class system {
@@ -324,6 +326,9 @@ public class system {
              else if (text.equals("查询学分")) {
                     queryCredits();
             }
+            else if (text.equals("查询数据")) {
+                queryStudentData(); // 调用新的查询方法
+            }
             else {
                 JOptionPane.showMessageDialog(null,
                         "【" + text + "】功能正在开发中...",
@@ -333,6 +338,364 @@ public class system {
         });
 
         return button;
+    }
+
+    /**
+     * 新增方法：查询学生数据
+     */
+    private static void queryStudentData() {
+        // 检查是否已连接数据库
+        if (savedDbName == null || savedDbName.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "尚未连接到数据库，请先连接！",
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 获取用户输入的学号
+        String studentId = JOptionPane.showInputDialog(null,
+                "请输入学生学号：",
+                "学生数据查询",
+                JOptionPane.QUESTION_MESSAGE);
+
+        // 验证输入
+        if (studentId == null) {
+            return; // 用户取消输入
+        }
+        studentId = studentId.trim();
+        if (studentId.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "学号不能为空！",
+                    "输入错误",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // 创建进度对话框
+        final JDialog progressDialog = new JDialog((JFrame) null, "正在查询", true);
+        JPanel progressPanel = new JPanel(new BorderLayout());
+        progressPanel.add(new JLabel("正在查询学号: " + studentId + " 的相关信息...", SwingConstants.CENTER), BorderLayout.CENTER);
+        progressPanel.setBorder(BorderFactory.createEmptyBorder(20, 50, 20, 50));
+        progressDialog.add(progressPanel);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(null);
+        progressDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        // 使用SwingWorker在后台执行查询
+        String finalStudentId = studentId;
+        SwingWorker<Map<String, Object>, Void> worker = new SwingWorker<Map<String, Object>, Void>() {
+            @Override
+            protected Map<String, Object> doInBackground() throws Exception {
+                Map<String, Object> result = new HashMap<>();
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+                    // 1. 查询学生基本信息
+                    Vector<Vector<Object>> baseInfoData = new Vector<>();
+                    String baseInfoQuery = "SELECT * FROM 基本信息 WHERE 学号 = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(baseInfoQuery)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            if (!rs.next()) {
+                                JOptionPane.showMessageDialog(null,
+                                        "找不到学号为 '" + finalStudentId + "' 的学生！",
+                                        "查询错误",
+                                        JOptionPane.ERROR_MESSAGE);
+                                return null;
+                            }
+
+                            // 获取列信息
+                            ResultSetMetaData metaData = rs.getMetaData();
+                            int columnCount = metaData.getColumnCount();
+
+                            // 添加列名
+                            Vector<String> columnNames = new Vector<>();
+                            for (int i = 1; i <= columnCount; i++) {
+                                columnNames.add(metaData.getColumnName(i));
+                            }
+
+                            // 添加行数据
+                            Vector<Object> row = new Vector<>();
+                            for (int i = 1; i <= columnCount; i++) {
+                                row.add(rs.getObject(i));
+                            }
+                            baseInfoData.add(row);
+
+                            result.put("baseInfoData", baseInfoData);
+                            result.put("baseInfoColumns", columnNames);
+
+                            // 保存专业编号用于查询学院专业信息
+                            String majorCode = rs.getString("专业编号");
+                            result.put("majorCode", majorCode);
+                        }
+                    }
+
+                    // 2. 查询健康信息
+                    Vector<Vector<Object>> healthData = new Vector<>();
+                    String healthQuery = "SELECT * FROM 健康信息 WHERE 学号 = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(healthQuery)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            ResultSetMetaData metaData = rs.getMetaData();
+                            int columnCount = metaData.getColumnCount();
+
+                            Vector<String> columnNames = new Vector<>();
+                            for (int i = 1; i <= columnCount; i++) {
+                                columnNames.add(metaData.getColumnName(i));
+                            }
+
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                for (int i = 1; i <= columnCount; i++) {
+                                    row.add(rs.getObject(i));
+                                }
+                                healthData.add(row);
+                            }
+
+                            result.put("healthData", healthData);
+                            result.put("healthColumns", columnNames);
+                        }
+                    }
+
+                    // 3. 查询参与组织信息
+                    Vector<Vector<Object>> orgData = new Vector<>();
+                    String orgQuery = "SELECT * FROM 参与组织 WHERE 学号 = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(orgQuery)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            ResultSetMetaData metaData = rs.getMetaData();
+                            int columnCount = metaData.getColumnCount();
+
+                            Vector<String> columnNames = new Vector<>();
+                            for (int i = 1; i <= columnCount; i++) {
+                                columnNames.add(metaData.getColumnName(i));
+                            }
+
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                for (int i = 1; i <= columnCount; i++) {
+                                    row.add(rs.getObject(i));
+                                }
+                                orgData.add(row);
+                            }
+
+                            result.put("orgData", orgData);
+                            result.put("orgColumns", columnNames);
+                        }
+                    }
+
+                    // 4. 查询成绩信息
+                    Vector<Vector<Object>> scoreData = new Vector<>();
+                    String scoreQuery = "SELECT * FROM 成绩表 WHERE 学号 = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(scoreQuery)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            ResultSetMetaData metaData = rs.getMetaData();
+                            int columnCount = metaData.getColumnCount();
+
+                            Vector<String> columnNames = new Vector<>();
+                            for (int i = 1; i <= columnCount; i++) {
+                                columnNames.add(metaData.getColumnName(i));
+                            }
+
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                for (int i = 1; i <= columnCount; i++) {
+                                    row.add(rs.getObject(i));
+                                }
+                                scoreData.add(row);
+                            }
+
+                            result.put("scoreData", scoreData);
+                            result.put("scoreColumns", columnNames);
+                        }
+                    }
+
+                    // 5. 查询毕业设计信息
+                    Vector<Vector<Object>> gradData = new Vector<>();
+                    String gradQuery = "SELECT * FROM 毕业设计 WHERE 学号 = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(gradQuery)) {
+                        pstmt.setString(1, finalStudentId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            ResultSetMetaData metaData = rs.getMetaData();
+                            int columnCount = metaData.getColumnCount();
+
+                            Vector<String> columnNames = new Vector<>();
+                            for (int i = 1; i <= columnCount; i++) {
+                                columnNames.add(metaData.getColumnName(i));
+                            }
+
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                for (int i = 1; i <= columnCount; i++) {
+                                    row.add(rs.getObject(i));
+                                }
+                                gradData.add(row);
+                            }
+
+                            result.put("gradData", gradData);
+                            result.put("gradColumns", columnNames);
+                        }
+                    }
+
+                    // 6. 查询学院专业信息
+                    String majorCode = (String) result.get("majorCode");
+                    if (majorCode != null && !majorCode.isEmpty()) {
+                        String majorQuery = "SELECT * FROM 学院专业表 WHERE 专业编号 = ?";
+                        try (PreparedStatement pstmt = conn.prepareStatement(majorQuery)) {
+                            pstmt.setString(1, majorCode);
+                            try (ResultSet rs = pstmt.executeQuery()) {
+                                if (rs.next()) {
+                                    result.put("college", rs.getString("学院名称"));
+                                    result.put("major", rs.getString("专业名称"));
+                                }
+                            }
+                        }
+                    }
+
+                    return result;
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(null,
+                            "数据库查询错误: " + ex.getMessage(),
+                            "数据库错误",
+                            JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose(); // 关闭进度对话框
+                try {
+                    Map<String, Object> result = get();
+                    if (result != null) {
+                        showStudentDataResult(result);
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+
+    /**
+     * 显示学生数据查询结果
+     */
+    private static void showStudentDataResult(Map<String, Object> result) {
+        // 创建结果窗口
+        JFrame resultFrame = new JFrame("学生数据查询结果");
+        resultFrame.setSize(900, 600);
+        resultFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 创建选项卡面板
+        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.setFont(new Font("微软雅黑", Font.BOLD, 14));
+
+        // 1. 基本信息表
+        Vector<Vector<Object>> baseInfoData = (Vector<Vector<Object>>) result.get("baseInfoData");
+        Vector<String> baseInfoColumns = (Vector<String>) result.get("baseInfoColumns");
+        if (baseInfoData != null && !baseInfoData.isEmpty()) {
+            DefaultTableModel model = new DefaultTableModel(baseInfoData, baseInfoColumns);
+            JTable table = new JTable(model);
+            table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+            table.setRowHeight(25);
+
+            // 添加滚动面板
+            JScrollPane scrollPane = new JScrollPane(table);
+            tabbedPane.addTab("基本信息", scrollPane);
+        }
+
+        // 2. 健康信息表
+        Vector<Vector<Object>> healthData = (Vector<Vector<Object>>) result.get("healthData");
+        Vector<String> healthColumns = (Vector<String>) result.get("healthColumns");
+        if (healthData != null && !healthData.isEmpty()) {
+            DefaultTableModel model = new DefaultTableModel(healthData, healthColumns);
+            JTable table = new JTable(model);
+            table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+            table.setRowHeight(25);
+
+            JScrollPane scrollPane = new JScrollPane(table);
+            tabbedPane.addTab("健康信息", scrollPane);
+        }
+
+        // 3. 参与组织表
+        Vector<Vector<Object>> orgData = (Vector<Vector<Object>>) result.get("orgData");
+        Vector<String> orgColumns = (Vector<String>) result.get("orgColumns");
+        if (orgData != null && !orgData.isEmpty()) {
+            DefaultTableModel model = new DefaultTableModel(orgData, orgColumns);
+            JTable table = new JTable(model);
+            table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+            table.setRowHeight(25);
+
+            JScrollPane scrollPane = new JScrollPane(table);
+            tabbedPane.addTab("参与组织", scrollPane);
+        }
+
+        // 4. 成绩表
+        Vector<Vector<Object>> scoreData = (Vector<Vector<Object>>) result.get("scoreData");
+        Vector<String> scoreColumns = (Vector<String>) result.get("scoreColumns");
+        if (scoreData != null && !scoreData.isEmpty()) {
+            DefaultTableModel model = new DefaultTableModel(scoreData, scoreColumns);
+            JTable table = new JTable(model);
+            table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+            table.setRowHeight(25);
+
+            JScrollPane scrollPane = new JScrollPane(table);
+            tabbedPane.addTab("成绩信息", scrollPane);
+        }
+
+        // 5. 毕业设计表
+        Vector<Vector<Object>> gradData = (Vector<Vector<Object>>) result.get("gradData");
+        Vector<String> gradColumns = (Vector<String>) result.get("gradColumns");
+        if (gradData != null && !gradData.isEmpty()) {
+            DefaultTableModel model = new DefaultTableModel(gradData, gradColumns);
+            JTable table = new JTable(model);
+            table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+            table.setRowHeight(25);
+
+            JScrollPane scrollPane = new JScrollPane(table);
+            tabbedPane.addTab("毕业设计", scrollPane);
+        }
+
+        mainPanel.add(tabbedPane, BorderLayout.CENTER);
+
+        // 添加顶部信息面板 - 显示学院和专业
+        JPanel infoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
+        infoPanel.setBackground(new Color(220, 240, 255));
+
+        String college = (String) result.get("college");
+        String major = (String) result.get("major");
+
+        if (college != null && major != null) {
+            JLabel collegeLabel = new JLabel("所属学院: " + college);
+            collegeLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
+            collegeLabel.setForeground(new Color(0, 100, 0));
+
+            JLabel majorLabel = new JLabel("所属专业: " + major);
+            majorLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
+            majorLabel.setForeground(new Color(0, 0, 150));
+
+            infoPanel.add(collegeLabel);
+            infoPanel.add(Box.createHorizontalStrut(30));
+            infoPanel.add(majorLabel);
+        } else {
+            JLabel noMajorLabel = new JLabel("尚未分配专业");
+            noMajorLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
+            noMajorLabel.setForeground(Color.RED);
+            infoPanel.add(noMajorLabel);
+        }
+
+        mainPanel.add(infoPanel, BorderLayout.NORTH);
+
+        resultFrame.add(mainPanel);
+        resultFrame.setVisible(true);
     }
 
     /**
