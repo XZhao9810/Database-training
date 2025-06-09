@@ -1,7 +1,7 @@
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableModel;
-import javax.swing.table.TableRowSorter;
+import javax.swing.event.TableModelEvent;
+import javax.swing.event.TableModelListener;
+import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -329,6 +329,9 @@ public class system {
             else if (text.equals("查询数据")) {
                 queryStudentData(); // 调用新的查询方法
             }
+            else if (text.equals("修改数据")) {
+                editTableData(); // 新增的修改数据功能
+            }
             else {
                 JOptionPane.showMessageDialog(null,
                         "【" + text + "】功能正在开发中...",
@@ -338,6 +341,346 @@ public class system {
         });
 
         return button;
+    }
+
+    /**
+     * 新增方法：编辑表数据
+     */
+    private static void editTableData() {
+        // 检查是否已连接数据库
+        if (savedDbName == null || savedDbName.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "尚未连接到数据库，请先连接！",
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 获取数据库表名列表
+        Vector<String> tableNames = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            try (ResultSet tables = metaData.getTables(savedDbName, null, "%", new String[]{"TABLE"})) {
+                while (tables.next()) {
+                    tableNames.add(tables.getString("TABLE_NAME"));
+                }
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "获取表列表失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 检查是否有表
+        if (tableNames.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "数据库 '" + savedDbName + "' 中没有找到任何表！",
+                    "数据库错误",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 创建表选择对话框
+        JComboBox<String> tableComboBox = new JComboBox<>(tableNames);
+        JPanel panel = new JPanel(new GridLayout(0, 1));
+        panel.add(new JLabel("请选择要编辑的表:"));
+        panel.add(tableComboBox);
+
+        int result = JOptionPane.showConfirmDialog(null, panel,
+                "选择表", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        String selectedTable = (String) tableComboBox.getSelectedItem();
+        displayEditableTableData(selectedTable);
+    }
+
+    /**
+     * 显示可编辑的表数据
+     */
+    private static void displayEditableTableData(String tableName) {
+        // 创建数据编辑窗口
+        JFrame editFrame = new JFrame("编辑表数据: " + tableName);
+        editFrame.setSize(900, 600);
+        editFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 添加标题
+        JLabel titleLabel = new JLabel("表: " + tableName + " (数据库: " + savedDbName + ")");
+        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 18));
+        mainPanel.add(titleLabel, BorderLayout.NORTH);
+
+        // 创建表格模型
+        DefaultTableModel model = new DefaultTableModel();
+        JTable table = new JTable(model) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                // 所有单元格都可编辑
+                return true;
+            }
+        };
+        table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        table.setRowHeight(25);
+
+        // 添加排序功能
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(model);
+        table.setRowSorter(sorter);
+
+        // 添加滚动面板
+        JScrollPane scrollPane = new JScrollPane(table);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // 添加状态标签
+        JLabel statusLabel = new JLabel("正在加载数据...");
+        statusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        mainPanel.add(statusLabel, BorderLayout.SOUTH);
+
+        editFrame.add(mainPanel);
+        editFrame.setVisible(true);
+
+        // 获取主键信息
+        Vector<String> primaryKeys = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            try (ResultSet pkResult = metaData.getPrimaryKeys(null, null, tableName)) {
+                while (pkResult.next()) {
+                    primaryKeys.add(pkResult.getString("COLUMN_NAME"));
+                }
+            }
+        } catch (SQLException ex) {
+            statusLabel.setText("获取主键失败: " + ex.getMessage());
+        }
+
+        // 使用SwingWorker在后台加载数据
+        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+                     Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery("SELECT * FROM " + tableName)) {
+
+                    // 获取列信息
+                    ResultSetMetaData metaData = rs.getMetaData();
+                    int columnCount = metaData.getColumnCount();
+
+                    // 添加列名到表格模型
+                    Vector<String> columnNames = new Vector<>();
+                    for (int i = 1; i <= columnCount; i++) {
+                        columnNames.add(metaData.getColumnName(i));
+                    }
+
+                    SwingUtilities.invokeLater(() -> {
+                        model.setColumnIdentifiers(columnNames);
+                        statusLabel.setText("已加载列信息，正在加载行数据...");
+                    });
+
+                    // 添加行数据
+                    while (rs.next()) {
+                        Vector<Object> rowData = new Vector<>();
+                        for (int i = 1; i <= columnCount; i++) {
+                            rowData.add(rs.getObject(i));
+                        }
+
+                        // 在EDT中更新表格
+                        final Vector<Object> finalRow = rowData;
+                        SwingUtilities.invokeLater(() -> model.addRow(finalRow));
+                    }
+
+                    SwingUtilities.invokeLater(() -> {
+                        statusLabel.setText("加载完成! 共 " + model.getRowCount() + " 行记录");
+
+                        // 高亮显示主键列
+                        TableColumnModel columnModel = table.getColumnModel();
+                        for (int i = 0; i < columnNames.size(); i++) {
+                            if (primaryKeys.contains(columnNames.get(i))) {
+                                table.getColumnModel().getColumn(i).setCellRenderer(new PrimaryKeyRenderer());
+                            }
+                        }
+                    });
+
+                } catch (SQLException ex) {
+                    SwingUtilities.invokeLater(() -> {
+                        statusLabel.setText("数据加载失败: " + ex.getMessage());
+                        JOptionPane.showMessageDialog(editFrame,
+                                "查询表数据时出错: " + ex.getMessage(),
+                                "数据库错误",
+                                JOptionPane.ERROR_MESSAGE);
+                    });
+                }
+                return null;
+            }
+        };
+
+        worker.execute();
+
+        // 添加表格模型监听器，处理数据修改
+        model.addTableModelListener(new TableModelListener() {
+            @Override
+            public void tableChanged(TableModelEvent e) {
+                if (e.getType() == TableModelEvent.UPDATE && e.getColumn() != TableModelEvent.ALL_COLUMNS) {
+                    int row = e.getFirstRow();
+                    int col = e.getColumn();
+
+                    // 获取模型索引（考虑排序）
+                    int modelRow = table.convertRowIndexToModel(row);
+                    int modelCol = table.convertColumnIndexToModel(col);
+
+                    Object newValue = model.getValueAt(modelRow, modelCol);
+
+                    // 在后台更新数据库
+                    SwingWorker<Boolean, Void> updateWorker = new SwingWorker<Boolean, Void>() {
+                        @Override
+                        protected Boolean doInBackground() throws Exception {
+                            return updateDatabase(tableName, model, modelRow, modelCol, newValue, primaryKeys);
+                        }
+
+                        @Override
+                        protected void done() {
+                            try {
+                                if (!get()) {
+                                    // 更新失败，恢复原值
+                                    JOptionPane.showMessageDialog(editFrame,
+                                            "更新数据库失败，已恢复原值",
+                                            "更新错误",
+                                            JOptionPane.ERROR_MESSAGE);
+                                    // 重新加载数据
+                                    model.setRowCount(0);
+                                    loadTableData(tableName, model, statusLabel);
+                                }
+                            } catch (Exception ex) {
+                                ex.printStackTrace();
+                            }
+                        }
+                    };
+                    updateWorker.execute();
+                }
+            }
+        });
+    }
+
+    /**
+     * 高亮显示主键列的渲染器
+     */
+    static class PrimaryKeyRenderer extends DefaultTableCellRenderer implements TableCellRenderer {
+        public PrimaryKeyRenderer() {
+            setOpaque(true);
+        }
+
+        public PrimaryKeyRenderer getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            setBackground(new Color(220, 240, 255)); // 浅蓝色背景
+            setFont(table.getFont().deriveFont(Font.BOLD));
+            return this;
+        }
+    }
+
+    /**
+     * 更新数据库
+     */
+    private static boolean updateDatabase(String tableName, DefaultTableModel model,
+                                          int row, int col, Object newValue, Vector<String> primaryKeys) {
+        // 获取列名
+        String columnName = model.getColumnName(col);
+
+        // 构建WHERE子句（主键条件）
+        StringBuilder whereClause = new StringBuilder();
+        Vector<Object> primaryKeyValues = new Vector<>();
+
+        for (String pk : primaryKeys) {
+            int pkCol = -1;
+            for (int i = 0; i < model.getColumnCount(); i++) {
+                if (model.getColumnName(i).equals(pk)) {
+                    pkCol = i;
+                    break;
+                }
+            }
+
+            if (pkCol != -1) {
+                Object pkValue = model.getValueAt(row, pkCol);
+                primaryKeyValues.add(pkValue);
+
+                if (whereClause.length() > 0) {
+                    whereClause.append(" AND ");
+                }
+                whereClause.append(pk).append(" = ?");
+            }
+        }
+
+        if (whereClause.length() == 0) {
+            JOptionPane.showMessageDialog(null,
+                    "无法确定主键条件，更新失败",
+                    "更新错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        // 构建SQL
+        String sql = "UPDATE " + tableName + " SET " + columnName + " = ? WHERE " + whereClause;
+
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            // 设置参数
+            pstmt.setObject(1, newValue);
+
+            for (int i = 0; i < primaryKeyValues.size(); i++) {
+                pstmt.setObject(i + 2, primaryKeyValues.get(i));
+            }
+
+            int rowsAffected = pstmt.executeUpdate();
+            return rowsAffected > 0;
+
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "更新失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    /**
+     * 加载表数据
+     */
+    private static void loadTableData(String tableName, DefaultTableModel model, JLabel statusLabel) {
+        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+                     Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery("SELECT * FROM " + tableName)) {
+
+                    // 清空现有数据
+                    model.setRowCount(0);
+
+                    // 添加行数据
+                    while (rs.next()) {
+                        Vector<Object> rowData = new Vector<>();
+                        for (int i = 1; i <= model.getColumnCount(); i++) {
+                            rowData.add(rs.getObject(i));
+                        }
+                        SwingUtilities.invokeLater(() -> model.addRow(rowData));
+                    }
+
+                    SwingUtilities.invokeLater(() ->
+                            statusLabel.setText("数据已刷新! 共 " + model.getRowCount() + " 行记录"));
+
+                } catch (SQLException ex) {
+                    SwingUtilities.invokeLater(() ->
+                            statusLabel.setText("数据加载失败: " + ex.getMessage()));
+                }
+                return null;
+            }
+        };
+        worker.execute();
     }
 
     /**
