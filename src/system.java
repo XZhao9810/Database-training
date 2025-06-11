@@ -269,9 +269,14 @@ public class system {
         JButton searchButton = createFunctionButton("查询数据", new Color(241, 196, 15));
         functionPanel.add(searchButton);
 
-        // 统计学分按钮
+        // 查询学分按钮
         JButton statsButton = createFunctionButton("查询学分", new Color(230, 126, 34));
         functionPanel.add(statsButton);
+
+        // 新增：统计学分按钮（位置在查询学分右边）
+        JButton statCreditButton = createFunctionButton("统计学分", new Color(151, 97, 172)); // 使用紫色
+        functionPanel.add(statCreditButton);
+        mainPanel.add(functionPanel, BorderLayout.CENTER);
 
         // 预留位置
         functionPanel.add(new JLabel());
@@ -331,6 +336,9 @@ public class system {
             }
             else if (text.equals("修改数据")) {
                 editTableData(); // 新增的修改数据功能
+            }// 新增：统计学分按钮的功能（暂时不实现）
+            else if (text.equals("统计学分")) {
+                showCreditStatisticsDialog();
             }
             else {
                 JOptionPane.showMessageDialog(null,
@@ -341,6 +349,657 @@ public class system {
         });
 
         return button;
+    }
+
+    /**
+     * 显示学分统计对话框
+     */
+    private static void showCreditStatisticsDialog() {
+        // 检查是否已连接数据库
+        if (savedDbName == null || savedDbName.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "尚未连接到数据库，请先连接！",
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 创建统计方式选择对话框
+        JDialog dialog = new JDialog((JFrame) null, "选择统计方式", true);
+        dialog.setSize(400, 300);
+        dialog.setLocationRelativeTo(null);
+        dialog.setLayout(new BorderLayout());
+
+        JPanel mainPanel = new JPanel();
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
+
+        // 添加标题
+        JLabel titleLabel = new JLabel("请选择学分统计方式");
+        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 18));
+        titleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        mainPanel.add(titleLabel);
+        mainPanel.add(Box.createVerticalStrut(20));
+
+        // 创建单选按钮组
+        ButtonGroup group = new ButtonGroup();
+        JRadioButton classButton = new JRadioButton("按班级统计");
+        JRadioButton courseButton = new JRadioButton("按课程统计");
+        JRadioButton majorButton = new JRadioButton("按专业统计");
+
+        classButton.setFont(new Font("微软雅黑", Font.PLAIN, 16));
+        courseButton.setFont(new Font("微软雅黑", Font.PLAIN, 16));
+        majorButton.setFont(new Font("微软雅黑", Font.PLAIN, 16));
+
+        group.add(classButton);
+        group.add(courseButton);
+        group.add(majorButton);
+
+        // 默认选择第一个
+        classButton.setSelected(true);
+
+        JPanel radioPanel = new JPanel();
+        radioPanel.setLayout(new GridLayout(3, 1, 10, 10));
+        radioPanel.add(classButton);
+        radioPanel.add(courseButton);
+        radioPanel.add(majorButton);
+
+        mainPanel.add(radioPanel);
+        mainPanel.add(Box.createVerticalStrut(20));
+
+        // 添加确定按钮
+        JButton okButton = new JButton("确定");
+        okButton.setFont(new Font("微软雅黑", Font.BOLD, 16));
+        okButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+        okButton.addActionListener(e -> {
+            dialog.dispose();
+            if (classButton.isSelected()) {
+                showClassStatistics();
+            } else if (courseButton.isSelected()) {
+                showCourseStatistics();
+            } else if (majorButton.isSelected()) {
+                showMajorStatistics();
+            }
+        });
+
+        mainPanel.add(okButton);
+
+        dialog.add(mainPanel, BorderLayout.CENTER);
+        dialog.setVisible(true);
+    }
+
+    /**
+     * 显示按班级统计学分
+     */
+    private static void showClassStatistics() {
+        // 获取所有班级
+        Vector<String> classes = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT DISTINCT 班级 FROM 基本信息")) {
+
+            while (rs.next()) {
+                classes.add(rs.getString("班级"));
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "获取班级列表失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (classes.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "数据库中未找到班级信息！",
+                    "数据错误",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 创建班级选择对话框
+        JComboBox<String> classComboBox = new JComboBox<>(classes);
+        JPanel panel = new JPanel();
+        panel.add(new JLabel("请选择班级:"));
+        panel.add(classComboBox);
+
+        int result = JOptionPane.showConfirmDialog(null, panel,
+                "选择班级", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        String selectedClass = (String) classComboBox.getSelectedItem();
+        calculateClassCredits(selectedClass);
+    }
+
+    /**
+     * 计算并显示班级学分统计
+     */
+    private static void calculateClassCredits(String className) {
+        // 创建进度对话框
+        final JDialog progressDialog = new JDialog((JFrame) null, "正在统计", true);
+        JPanel progressPanel = new JPanel(new BorderLayout());
+        progressPanel.add(new JLabel("正在统计班级 '" + className + "' 的学分信息...", SwingConstants.CENTER), BorderLayout.CENTER);
+        progressPanel.setBorder(BorderFactory.createEmptyBorder(20, 50, 20, 50));
+        progressDialog.add(progressPanel);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(null);
+        progressDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        // 使用SwingWorker在后台执行统计
+        SwingWorker<Vector<Vector<Object>>, Void> worker = new SwingWorker<Vector<Vector<Object>>, Void>() {
+            @Override
+            protected Vector<Vector<Object>> doInBackground() throws Exception {
+                Vector<Vector<Object>> data = new Vector<>();
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+                    // 查询班级学分统计
+                    String query = "SELECT " +
+                            "b.学号, " +
+                            "b.姓名, " +
+                            "SUM(sc.学分) AS 总学分 " +
+                            "FROM 成绩表 sc " +
+                            "JOIN 基本信息 b ON sc.学号 = b.学号 " +
+                            "WHERE b.班级 = ? " +
+                            "GROUP BY b.学号, b.姓名";
+
+                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                        pstmt.setString(1, className);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                row.add(rs.getString("学号"));
+                                row.add(rs.getString("姓名"));
+                                row.add(rs.getFloat("总学分"));
+                                data.add(row);
+                            }
+                        }
+                    }
+
+                    // 如果没有查询到数据
+                    if (data.isEmpty()) {
+                        JOptionPane.showMessageDialog(null,
+                                "班级 '" + className + "' 没有学分记录！",
+                                "统计结果",
+                                JOptionPane.INFORMATION_MESSAGE);
+                        return null;
+                    }
+
+                    return data;
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(null,
+                            "数据库查询错误: " + ex.getMessage(),
+                            "数据库错误",
+                            JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                try {
+                    Vector<Vector<Object>> data = get();
+                    if (data != null) {
+                        showClassCreditsResult(className, data);
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+
+    /**
+     * 显示班级学分统计结果
+     */
+    private static void showClassCreditsResult(String className, Vector<Vector<Object>> data) {
+        // 创建结果窗口
+        JFrame resultFrame = new JFrame("班级学分统计 - " + className);
+        resultFrame.setSize(600, 500);
+        resultFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 创建列名
+        Vector<String> columnNames = new Vector<>();
+        columnNames.add("学号");
+        columnNames.add("姓名");
+        columnNames.add("总学分");
+
+        // 创建表格
+        DefaultTableModel model = new DefaultTableModel(data, columnNames);
+        JTable table = new JTable(model);
+        table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        table.setRowHeight(25);
+
+        // 添加排序功能
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(model);
+        table.setRowSorter(sorter);
+
+        // 添加滚动面板
+        JScrollPane scrollPane = new JScrollPane(table);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // 计算总学分和平均学分
+        float totalCredits = 0;
+        int studentCount = data.size();
+
+        for (Vector<Object> row : data) {
+            totalCredits += (float) row.get(2);
+        }
+
+        float avgCredits = studentCount > 0 ? totalCredits / studentCount : 0;
+
+        // 添加底部信息面板
+        JPanel infoPanel = new JPanel(new GridLayout(1, 3, 20, 10));
+        infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        infoPanel.setBackground(new Color(240, 240, 240));
+
+        // 创建信息标签
+        JLabel classLabel = createInfoLabel("班级: " + className, new Color(70, 130, 180));
+        JLabel totalLabel = createInfoLabel("总学分: " + String.format("%.2f", totalCredits), new Color(0, 100, 0));
+        JLabel avgLabel = createInfoLabel("平均学分: " + String.format("%.2f", avgCredits), new Color(52, 152, 219));
+
+        infoPanel.add(classLabel);
+        infoPanel.add(totalLabel);
+        infoPanel.add(avgLabel);
+
+        mainPanel.add(infoPanel, BorderLayout.SOUTH);
+
+        resultFrame.add(mainPanel);
+        resultFrame.setVisible(true);
+    }
+
+    /**
+     * 显示按课程统计学分
+     */
+    private static void showCourseStatistics() {
+        // 获取所有课程
+        Vector<String> courses = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT 课程编号, 课程名称 FROM 课程表")) {
+
+            while (rs.next()) {
+                courses.add(rs.getString("课程编号") + " - " + rs.getString("课程名称"));
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "获取课程列表失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (courses.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "数据库中未找到课程信息！",
+                    "数据错误",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 创建课程选择对话框
+        JComboBox<String> courseComboBox = new JComboBox<>(courses);
+        JPanel panel = new JPanel();
+        panel.add(new JLabel("请选择课程:"));
+        panel.add(courseComboBox);
+
+        int result = JOptionPane.showConfirmDialog(null, panel,
+                "选择课程", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        String selectedCourse = (String) courseComboBox.getSelectedItem();
+        // 提取课程编号
+        String courseId = selectedCourse.split(" - ")[0];
+        calculateCourseCredits(courseId);
+    }
+
+    /**
+     * 计算并显示课程学分统计
+     */
+    private static void calculateCourseCredits(String courseId) {
+        // 创建进度对话框
+        final JDialog progressDialog = new JDialog((JFrame) null, "正在统计", true);
+        JPanel progressPanel = new JPanel(new BorderLayout());
+        progressPanel.add(new JLabel("正在统计课程 '" + courseId + "' 的学分信息...", SwingConstants.CENTER), BorderLayout.CENTER);
+        progressPanel.setBorder(BorderFactory.createEmptyBorder(20, 50, 20, 50));
+        progressDialog.add(progressPanel);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(null);
+        progressDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        // 使用SwingWorker在后台执行统计
+        SwingWorker<Vector<Vector<Object>>, Void> worker = new SwingWorker<Vector<Vector<Object>>, Void>() {
+            @Override
+            protected Vector<Vector<Object>> doInBackground() throws Exception {
+                Vector<Vector<Object>> data = new Vector<>();
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+                    // 查询课程学分统计
+                    String query = "SELECT " +
+                            "c.课程名称, " +
+                            "s.学号, " +
+                            "s.姓名, " +
+                            "sc.学分 " +
+                            "FROM 成绩表 sc " +
+                            "JOIN 课程表 c ON sc.课程编号 = c.课程编号 " +
+                            "JOIN 基本信息 s ON sc.学号 = s.学号 " +
+                            "WHERE sc.课程编号 = ?";
+
+                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                        pstmt.setString(1, courseId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                row.add(rs.getString("课程名称"));
+                                row.add(rs.getString("学号"));
+                                row.add(rs.getString("姓名"));
+                                row.add(rs.getFloat("学分"));
+                                data.add(row);
+                            }
+                        }
+                    }
+
+                    // 如果没有查询到数据
+                    if (data.isEmpty()) {
+                        JOptionPane.showMessageDialog(null,
+                                "课程 '" + courseId + "' 没有学分记录！",
+                                "统计结果",
+                                JOptionPane.INFORMATION_MESSAGE);
+                        return null;
+                    }
+
+                    return data;
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(null,
+                            "数据库查询错误: " + ex.getMessage(),
+                            "数据库错误",
+                            JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                try {
+                    Vector<Vector<Object>> data = get();
+                    if (data != null) {
+                        showCourseCreditsResult(courseId, data);
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+
+    /**
+     * 显示课程学分统计结果
+     */
+    private static void showCourseCreditsResult(String courseId, Vector<Vector<Object>> data) {
+        // 创建结果窗口
+        JFrame resultFrame = new JFrame("课程学分统计 - " + courseId);
+        resultFrame.setSize(600, 500);
+        resultFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 创建列名
+        Vector<String> columnNames = new Vector<>();
+        columnNames.add("课程名称");
+        columnNames.add("学号");
+        columnNames.add("姓名");
+        columnNames.add("学分");
+
+        // 创建表格
+        DefaultTableModel model = new DefaultTableModel(data, columnNames);
+        JTable table = new JTable(model);
+        table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        table.setRowHeight(25);
+
+        // 添加排序功能
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(model);
+        table.setRowSorter(sorter);
+
+        // 添加滚动面板
+        JScrollPane scrollPane = new JScrollPane(table);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // 计算总学分和平均学分
+        float totalCredits = 0;
+        int studentCount = data.size();
+
+        for (Vector<Object> row : data) {
+            totalCredits += (float) row.get(3);
+        }
+
+        float avgCredits = studentCount > 0 ? totalCredits / studentCount : 0;
+
+        // 添加底部信息面板
+        JPanel infoPanel = new JPanel(new GridLayout(1, 3, 20, 10));
+        infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        infoPanel.setBackground(new Color(240, 240, 240));
+
+        // 创建信息标签
+        JLabel courseLabel = createInfoLabel("课程ID: " + courseId, new Color(70, 130, 180));
+        JLabel totalLabel = createInfoLabel("总学分: " + String.format("%.2f", totalCredits), new Color(0, 100, 0));
+        JLabel avgLabel = createInfoLabel("平均学分: " + String.format("%.2f", avgCredits), new Color(52, 152, 219));
+
+        infoPanel.add(courseLabel);
+        infoPanel.add(totalLabel);
+        infoPanel.add(avgLabel);
+
+        mainPanel.add(infoPanel, BorderLayout.SOUTH);
+
+        resultFrame.add(mainPanel);
+        resultFrame.setVisible(true);
+    }
+
+    /**
+     * 显示按专业统计学分
+     */
+    private static void showMajorStatistics() {
+        // 获取所有专业
+        Vector<String> majors = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT 专业编号, 专业名称 FROM 学院专业表")) {
+
+            while (rs.next()) {
+                majors.add(rs.getString("专业编号") + " - " + rs.getString("专业名称"));
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "获取专业列表失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (majors.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                    "数据库中未找到专业信息！",
+                    "数据错误",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // 创建专业选择对话框
+        JComboBox<String> majorComboBox = new JComboBox<>(majors);
+        JPanel panel = new JPanel();
+        panel.add(new JLabel("请选择专业:"));
+        panel.add(majorComboBox);
+
+        int result = JOptionPane.showConfirmDialog(null, panel,
+                "选择专业", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        String selectedMajor = (String) majorComboBox.getSelectedItem();
+        // 提取专业编号
+        String majorId = selectedMajor.split(" - ")[0];
+        calculateMajorCredits(majorId);
+    }
+
+    /**
+     * 计算并显示专业学分统计
+     */
+    private static void calculateMajorCredits(String majorId) {
+        // 创建进度对话框
+        final JDialog progressDialog = new JDialog((JFrame) null, "正在统计", true);
+        JPanel progressPanel = new JPanel(new BorderLayout());
+        progressPanel.add(new JLabel("正在统计专业 '" + majorId + "' 的学分信息...", SwingConstants.CENTER), BorderLayout.CENTER);
+        progressPanel.setBorder(BorderFactory.createEmptyBorder(20, 50, 20, 50));
+        progressDialog.add(progressPanel);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(null);
+        progressDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        // 使用SwingWorker在后台执行统计
+        SwingWorker<Vector<Vector<Object>>, Void> worker = new SwingWorker<Vector<Vector<Object>>, Void>() {
+            @Override
+            protected Vector<Vector<Object>> doInBackground() throws Exception {
+                Vector<Vector<Object>> data = new Vector<>();
+                try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+                    // 查询专业学分统计
+                    String query = "SELECT " +
+                            "s.学号, " +
+                            "s.姓名, " +
+                            "SUM(sc.学分) AS 总学分 " +
+                            "FROM 成绩表 sc " +
+                            "JOIN 基本信息 s ON sc.学号 = s.学号 " +
+                            "WHERE s.专业编号 = ? " +
+                            "GROUP BY s.学号, s.姓名";
+
+                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                        pstmt.setString(1, majorId);
+                        try (ResultSet rs = pstmt.executeQuery()) {
+                            while (rs.next()) {
+                                Vector<Object> row = new Vector<>();
+                                row.add(rs.getString("学号"));
+                                row.add(rs.getString("姓名"));
+                                row.add(rs.getFloat("总学分"));
+                                data.add(row);
+                            }
+                        }
+                    }
+
+                    // 如果没有查询到数据
+                    if (data.isEmpty()) {
+                        JOptionPane.showMessageDialog(null,
+                                "专业 '" + majorId + "' 没有学分记录！",
+                                "统计结果",
+                                JOptionPane.INFORMATION_MESSAGE);
+                        return null;
+                    }
+
+                    return data;
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(null,
+                            "数据库查询错误: " + ex.getMessage(),
+                            "数据库错误",
+                            JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                try {
+                    Vector<Vector<Object>> data = get();
+                    if (data != null) {
+                        showMajorCreditsResult(majorId, data);
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        worker.execute();
+        progressDialog.setVisible(true);
+    }
+
+    /**
+     * 显示专业学分统计结果
+     */
+    private static void showMajorCreditsResult(String majorId, Vector<Vector<Object>> data) {
+        // 创建结果窗口
+        JFrame resultFrame = new JFrame("专业学分统计 - " + majorId);
+        resultFrame.setSize(600, 500);
+        resultFrame.setLocationRelativeTo(null);
+
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // 创建列名
+        Vector<String> columnNames = new Vector<>();
+        columnNames.add("学号");
+        columnNames.add("姓名");
+        columnNames.add("总学分");
+
+        // 创建表格
+        DefaultTableModel model = new DefaultTableModel(data, columnNames);
+        JTable table = new JTable(model);
+        table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        table.setRowHeight(25);
+
+        // 添加排序功能
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(model);
+        table.setRowSorter(sorter);
+
+        // 添加滚动面板
+        JScrollPane scrollPane = new JScrollPane(table);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // 计算总学分和平均学分
+        float totalCredits = 0;
+        int studentCount = data.size();
+
+        for (Vector<Object> row : data) {
+            totalCredits += (float) row.get(2);
+        }
+
+        float avgCredits = studentCount > 0 ? totalCredits / studentCount : 0;
+
+        // 添加底部信息面板
+        JPanel infoPanel = new JPanel(new GridLayout(1, 3, 20, 10));
+        infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        infoPanel.setBackground(new Color(240, 240, 240));
+
+        // 创建信息标签
+        JLabel majorLabel = createInfoLabel("专业ID: " + majorId, new Color(70, 130, 180));
+        JLabel totalLabel = createInfoLabel("总学分: " + String.format("%.2f", totalCredits), new Color(0, 100, 0));
+        JLabel avgLabel = createInfoLabel("平均学分: " + String.format("%.2f", avgCredits), new Color(52, 152, 219));
+
+        infoPanel.add(majorLabel);
+        infoPanel.add(totalLabel);
+        infoPanel.add(avgLabel);
+
+        mainPanel.add(infoPanel, BorderLayout.SOUTH);
+
+        resultFrame.add(mainPanel);
+        resultFrame.setVisible(true);
     }
 
     /**
