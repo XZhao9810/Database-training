@@ -323,6 +323,16 @@ public class system {
 
         // 添加点击事件
         button.addActionListener(e -> {
+            // 检查学生用户权限
+            if (savedUsername != null && savedUsername.equalsIgnoreCase("student") &&
+                    (text.equals("添加数据") || text.equals("修改数据"))) {
+                JOptionPane.showMessageDialog(null,
+                        "你没有添加或修改数据的权限！",
+                        "权限不足",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
             if (text.equals("显示数据")) {
                 showTableData();
             } else if (text.equals("添加数据")) {
