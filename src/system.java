@@ -113,7 +113,7 @@ public class system {
 
         // ================== 状态显示区域 ==================
         gbc.gridy = 4;
-        statusLabel = new JLabel("就绪，请输入数据库凭据");
+        statusLabel = new JLabel("功能已就绪");
         statusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
         statusLabel.setForeground(new Color(100, 100, 100));
         mainPanel.add(statusLabel, gbc);
@@ -274,7 +274,7 @@ public class system {
         functionPanel.add(statsButton);
 
         // 新增：统计学分按钮（位置在查询学分右边）
-        JButton statCreditButton = createFunctionButton("统计学分", new Color(151, 97, 172)); // 使用紫色
+        JButton statCreditButton = createFunctionButton("统计学分", new Color(255, 0, 0)); // 使用紫色
         functionPanel.add(statCreditButton);
         mainPanel.add(functionPanel, BorderLayout.CENTER);
 
@@ -2342,40 +2342,67 @@ public class system {
         }
 
         try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
-            // 构建INSERT语句
-            StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " (");
-            StringBuilder values = new StringBuilder(" VALUES (");
+            // 如果是"基本信息"表，使用指定的INSERT语句
+            if (tableName.equals("基本信息")) {
+                String sql = "INSERT INTO `基本信息` (`学号`, `姓名`, `班级`, `出生时间`, `出生地`, `毕业学校`, `原籍住址`, `宿舍号`, `手机号`, `处分/奖励史`, `担任班委`, `专业编号`, `专业`) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-            for (int i = 0; i < labels.size(); i++) {
-                String fieldName = labels.get(i).getText()
-                        .replaceAll("\\*| \\(.*\\)|:", "").trim();
+                try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                    // 设置参数
+                    pstmt.setString(1, fields.get(0).getText().trim()); // 学号
+                    pstmt.setString(2, fields.get(1).getText().trim()); // 姓名
+                    pstmt.setString(3, fields.get(2).getText().trim()); // 班级
+                    pstmt.setString(4, fields.get(3).getText().trim()); // 出生时间
+                    pstmt.setString(5, fields.get(4).getText().trim()); // 出生地
+                    pstmt.setString(6, fields.get(5).getText().trim()); // 毕业学校
+                    pstmt.setString(7, fields.get(6).getText().trim()); // 原籍住址
+                    pstmt.setInt(8, Integer.parseInt(fields.get(7).getText().trim())); // 宿舍号
+                    pstmt.setString(9, fields.get(8).getText().trim()); // 手机号
+                    pstmt.setString(10, fields.get(9).getText().trim()); // 处分/奖励史
+                    pstmt.setString(11, fields.get(10).getText().trim()); // 担任班委
+                    pstmt.setString(12, fields.get(11).getText().trim()); // 专业编号
+                    pstmt.setString(13, fields.get(12).getText().trim()); // 专业
 
-                sql.append(fieldName);
-                values.append("?");
-
-                if (i < labels.size() - 1) {
-                    sql.append(", ");
-                    values.append(", ");
+                    // 执行插入
+                    int rowsAffected = pstmt.executeUpdate();
+                    return rowsAffected > 0;
                 }
-            }
+            } else {
+                // 构建INSERT语句
+                StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " (");
+                StringBuilder values = new StringBuilder(" VALUES (");
 
-            sql.append(")").append(values).append(")");
+                for (int i = 0; i < labels.size(); i++) {
+                    String fieldName = labels.get(i).getText()
+                            .replaceAll("\\*| \\(.*\\)|:", "").trim();
 
-            // 准备语句
-            try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
-                // 设置参数
-                for (int i = 0; i < fields.size(); i++) {
-                    String value = fields.get(i).getText().trim();
-                    if (value.isEmpty()) {
-                        pstmt.setNull(i + 1, Types.NULL);
-                    } else {
-                        pstmt.setString(i + 1, value);
+                    sql.append(fieldName);
+                    values.append("?");
+
+                    if (i < labels.size() - 1) {
+                        sql.append(", ");
+                        values.append(", ");
                     }
                 }
 
-                // 执行插入
-                int rowsAffected = pstmt.executeUpdate();
-                return rowsAffected > 0;
+                sql.append(")").append(values).append(")");
+
+                // 准备语句
+                try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+                    // 设置参数
+                    for (int i = 0; i < fields.size(); i++) {
+                        String value = fields.get(i).getText().trim();
+                        if (value.isEmpty()) {
+                            pstmt.setNull(i + 1, Types.NULL);
+                        } else {
+                            pstmt.setString(i + 1, value);
+                        }
+                    }
+
+                    // 执行插入
+                    int rowsAffected = pstmt.executeUpdate();
+                    return rowsAffected > 0;
+                }
             }
         }
     }
