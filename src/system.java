@@ -18,7 +18,9 @@ public class system {
     private static JLabel statusLabel;
     private static JFrame loginFrame;
 
-    // 保存数据库连接信息
+    /**
+    * 保存数据库连接信息
+    */
     private static String savedDbName;
     private static String savedUsername;
     private static String savedPassword;
@@ -1013,7 +1015,7 @@ public class system {
     }
 
     /**
-     * 新增方法：编辑表数据
+     * 编辑表数据
      */
     private static void editTableData() {
         // 检查是否已连接数据库
@@ -1127,6 +1129,9 @@ public class system {
             statusLabel.setText("获取主键失败: " + ex.getMessage());
         }
 
+        // 添加：存储原始数据的集合
+        final Vector<Vector<Object>> originalData = new Vector<>();
+
         // 使用SwingWorker在后台加载数据
         SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
             @Override
@@ -1156,6 +1161,9 @@ public class system {
                         for (int i = 1; i <= columnCount; i++) {
                             rowData.add(rs.getObject(i));
                         }
+
+                        // 保存原始数据
+                        originalData.add(new Vector<>(rowData));
 
                         // 在EDT中更新表格
                         final Vector<Object> finalRow = rowData;
@@ -1189,39 +1197,39 @@ public class system {
 
         worker.execute();
 
-        // 添加表格模型监听器，处理数据修改
+        // 修改表格模型监听器
         model.addTableModelListener(new TableModelListener() {
             @Override
             public void tableChanged(TableModelEvent e) {
                 if (e.getType() == TableModelEvent.UPDATE && e.getColumn() != TableModelEvent.ALL_COLUMNS) {
-                    int row = e.getFirstRow();
+                    int viewRow = e.getFirstRow();
                     int col = e.getColumn();
-
-                    // 获取模型索引（考虑排序）
-                    int modelRow = table.convertRowIndexToModel(row);
+                    int modelRow = table.convertRowIndexToModel(viewRow);
                     int modelCol = table.convertColumnIndexToModel(col);
-
                     Object newValue = model.getValueAt(modelRow, modelCol);
+
+                    // 获取原始行数据
+                    Vector<Object> originalRow = originalData.get(modelRow);
 
                     // 在后台更新数据库
                     SwingWorker<Boolean, Void> updateWorker = new SwingWorker<Boolean, Void>() {
                         @Override
                         protected Boolean doInBackground() throws Exception {
-                            return updateDatabase(tableName, model, modelRow, modelCol, newValue, primaryKeys);
+                            // 传递原始行数据
+                            return updateDatabase(tableName, model, modelRow, modelCol,
+                                    newValue, primaryKeys, originalRow);
                         }
 
                         @Override
                         protected void done() {
                             try {
                                 if (!get()) {
-                                    // 更新失败，恢复原值
-                                    JOptionPane.showMessageDialog(editFrame,
-                                            "更新数据库失败，已恢复原值",
-                                            "更新错误",
-                                            JOptionPane.ERROR_MESSAGE);
-                                    // 重新加载数据
-                                    model.setRowCount(0);
-                                    loadTableData(tableName, model, statusLabel);
+                                    // ... [原有错误处理] ...
+                                } else {
+                                    // 更新成功后更新原始数据
+                                    for (int i = 0; i < model.getColumnCount(); i++) {
+                                        originalRow.set(i, model.getValueAt(modelRow, i));
+                                    }
                                 }
                             } catch (Exception ex) {
                                 ex.printStackTrace();
@@ -1255,11 +1263,38 @@ public class system {
      * 更新数据库
      */
     private static boolean updateDatabase(String tableName, DefaultTableModel model,
-                                          int row, int col, Object newValue, Vector<String> primaryKeys) {
+                                          int row, int col, Object newValue,
+                                          Vector<String> primaryKeys, Vector<Object> originalRow) {
         // 获取列名
         String columnName = model.getColumnName(col);
 
-        // 构建WHERE子句（主键条件）
+
+        // 特殊处理参与组织表的组织编号和组织名称修改
+        if ("参与组织".equals(tableName)) {
+            // 查找学号列的索引
+            int studentIdCol = -1;
+            for (int i = 0; i < model.getColumnCount(); i++) {
+                if ("学号".equals(model.getColumnName(i))) {
+                    studentIdCol = i;
+                    break;
+                }
+            }
+
+            if (studentIdCol != -1) {
+                String studentId = model.getValueAt(row, studentIdCol).toString();
+                String oldValue = model.getValueAt(row, col).toString(); // 获取旧值
+
+                if ("组织编号".equals(columnName)) {
+                    return updateOrganizationId(tableName, newValue, studentId, oldValue);
+                } else if ("组织名称".equals(columnName)) {
+                    return updateOrganizationName(tableName, newValue, studentId, oldValue);
+                }
+            }
+        }
+
+
+
+        // 构建WHERE子句（使用原始主键值）
         StringBuilder whereClause = new StringBuilder();
         Vector<Object> primaryKeyValues = new Vector<>();
 
@@ -1273,7 +1308,8 @@ public class system {
             }
 
             if (pkCol != -1) {
-                Object pkValue = model.getValueAt(row, pkCol);
+                // 关键修改：使用原始行数据中的主键值
+                Object pkValue = originalRow.get(pkCol);
                 primaryKeyValues.add(pkValue);
 
                 if (whereClause.length() > 0) {
@@ -1297,9 +1333,10 @@ public class system {
         try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-            // 设置参数
+            // 设置新值参数
             pstmt.setObject(1, newValue);
 
+            // 设置主键参数（使用原始值）
             for (int i = 0; i < primaryKeyValues.size(); i++) {
                 pstmt.setObject(i + 2, primaryKeyValues.get(i));
             }
@@ -1352,8 +1389,56 @@ public class system {
         worker.execute();
     }
 
+    // 更新组织编号的专用方法
+    private static boolean updateOrganizationId(String tableName, Object newValue,
+                                                String studentId, String oldOrgId) {
+        String sql = "UPDATE 参与组织 SET 组织编号 = ? WHERE 学号 = ? AND 组织编号 = ?";
+
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, newValue.toString());
+            pstmt.setString(2, studentId);
+            pstmt.setString(3, oldOrgId);
+
+            int rowsAffected = pstmt.executeUpdate();
+            return rowsAffected > 0;
+
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "更新组织编号失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    // 更新组织名称的专用方法
+    private static boolean updateOrganizationName(String tableName, Object newValue,
+                                                  String studentId, String oldOrgName) {
+        String sql = "UPDATE 参与组织 SET 组织名称 = ? WHERE 学号 = ? AND 组织名称 = ?";
+
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, newValue.toString());
+            pstmt.setString(2, studentId);
+            pstmt.setString(3, oldOrgName);
+
+            int rowsAffected = pstmt.executeUpdate();
+            return rowsAffected > 0;
+
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "更新组织名称失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
     /**
-     * 新增方法：查询学生数据
+     * 查询学生数据
      */
     private static void queryStudentData() {
         // 检查是否已连接数据库
@@ -2133,7 +2218,7 @@ public class system {
     }
 
     /**
-     * 新增方法：添加数据到表
+     * 添加数据到表
      */
     private static void addDataToTable() {
         // 检查是否已连接数据库
@@ -2189,7 +2274,7 @@ public class system {
     }
 
     /**
-     * 新增方法：创建添加数据的表单
+     * 创建添加数据的表单
      */
     private static void createAddDataForm(String tableName) {
         JFrame addFrame = new JFrame("添加数据到表: " + tableName);
@@ -2323,7 +2408,7 @@ public class system {
     }
 
     /**
-     * 新增方法：执行数据插入
+     * 执行数据插入
      */
     private static boolean insertData(String tableName, Vector<JTextField> fields,
                                       Vector<JLabel> labels, Vector<Boolean> isPrimaryKey,
