@@ -41,10 +41,10 @@ public class system {
         loginFrame = new JFrame("MySQL数据库连接工具");
         loginFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        // 创建主面板
-        JPanel mainPanel = new JPanel(new GridBagLayout());
+        // 创建主面板 - 使用自定义渐变背景面板
+        JPanel mainPanel = new GradientPanel();
+        mainPanel.setLayout(new GridBagLayout());
         mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        mainPanel.setBackground(new Color(240, 240, 240));
 
         // 创建约束对象
         GridBagConstraints gbc = new GridBagConstraints();
@@ -129,6 +129,32 @@ public class system {
         loginFrame.setSize(800, 600);
         loginFrame.setLocationRelativeTo(null);
         loginFrame.setVisible(true);
+
+
+    }
+
+    /**
+     * 自定义渐变背景面板
+     */
+    static class GradientPanel extends JPanel {
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2d = (Graphics2D) g;
+
+            // 创建浅色渐变：从浅蓝色渐变到浅绿色
+            Color startColor = new Color(230, 245, 255); // 浅蓝色
+            Color endColor = new Color(230, 255, 245);  // 浅绿色
+
+            // 创建渐变对象（从左到右）
+            GradientPaint gradient = new GradientPaint(
+                    0, 0, startColor,
+                    getWidth(), getHeight(), endColor
+            );
+
+            g2d.setPaint(gradient);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
+        }
     }
 
     /**
@@ -1252,12 +1278,11 @@ public class system {
                                     }
                                 };
                                 deleteWorker.execute();
-                                return; // 跳过更新逻辑
                             } else {
                                 // 用户取消删除：恢复原始值
                                 model.setValueAt(originalRow.get(modelCol), modelRow, modelCol);
-                                return;
                             }
+                            return; // 跳过更新逻辑
                         }
                     }
 
@@ -1292,7 +1317,9 @@ public class system {
         });
     }
 
-    // 添加删除数据库行的方法
+    /**
+    * 修改数据中的删除数据方法
+    */
     private static boolean deleteRowFromDatabase(String tableName, DefaultTableModel model,
                                                  int row, Vector<String> primaryKeys,
                                                  Vector<Object> originalRow) {
@@ -1498,7 +1525,9 @@ public class system {
         worker.execute();
     }
 
-    // 更新组织编号的专用方法
+    /**
+     * 修改数据中修改参与组织编号的方法
+     */
     private static boolean updateOrganizationId(String tableName, Object newValue,
                                                 String studentId, String oldOrgId) {
         String sql = "UPDATE 参与组织 SET 组织编号 = ? WHERE 学号 = ? AND 组织编号 = ?";
@@ -1522,7 +1551,9 @@ public class system {
         }
     }
 
-    // 更新组织名称的专用方法
+    /**
+     * 修改数据中修改参与组织名称的方法
+     */
     private static boolean updateOrganizationName(String tableName, Object newValue,
                                                   String studentId, String oldOrgName) {
         String sql = "UPDATE 参与组织 SET 组织名称 = ? WHERE 学号 = ? AND 组织名称 = ?";
@@ -2517,7 +2548,7 @@ public class system {
         // 提交按钮事件
         submitButton.addActionListener(e -> {
             try {
-                if (insertData(tableName, fields, labels, isPrimaryKey, isNullable)) {
+                if (insertData(tableName, fields, labels, isNullable)) {
                     JOptionPane.showMessageDialog(addFrame,
                             "数据添加成功！",
                             "成功",
@@ -2543,7 +2574,7 @@ public class system {
      * 执行数据插入
      */
     private static boolean insertData(String tableName, Vector<JTextField> fields,
-                                      Vector<JLabel> labels, Vector<Boolean> isPrimaryKey,
+                                      Vector<JLabel> labels,
                                       Vector<Boolean> isNullable) throws SQLException {
         // 验证必填字段
         for (int i = 0; i < fields.size(); i++) {
