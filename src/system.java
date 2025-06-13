@@ -192,6 +192,7 @@ public class system {
                         try {
                             conn.close();
                         } catch (SQLException ex) {
+                            throw new RuntimeException(ex);
                         }
                     }
                 }
@@ -275,7 +276,7 @@ public class system {
         JButton statsButton = createFunctionButton("查询学分", new Color(230, 126, 34));
         functionPanel.add(statsButton);
 
-        // 新增：统计学分按钮（位置在查询学分右边）
+        // 统计学分按钮（位置在查询学分右边）
         JButton statCreditButton = createFunctionButton("统计学分", new Color(255, 0, 0)); // 使用紫色
         functionPanel.add(statCreditButton);
         mainPanel.add(functionPanel, BorderLayout.CENTER);
@@ -347,7 +348,7 @@ public class system {
                 queryStudentData(); // 调用新的查询方法
             }
             else if (text.equals("修改数据")) {
-                editTableData(); // 新增的修改数据功能
+                editTableData(); // 修改数据功能
             }// 新增：统计学分按钮的功能（暂时不实现）
             else if (text.equals("统计学分")) {
                 showCreditStatisticsDialog();
@@ -1207,15 +1208,63 @@ public class system {
                     int modelRow = table.convertRowIndexToModel(viewRow);
                     int modelCol = table.convertColumnIndexToModel(col);
                     Object newValue = model.getValueAt(modelRow, modelCol);
-
-                    // 获取原始行数据
                     Vector<Object> originalRow = originalData.get(modelRow);
 
-                    // 在后台更新数据库
+                    // 检查是否主键列被清空
+                    if (primaryKeys.contains(model.getColumnName(modelCol))) {
+                        if (newValue == null || newValue.toString().trim().isEmpty()) {
+                            // 弹出确认对话框
+                            int confirm = JOptionPane.showConfirmDialog(
+                                    editFrame,
+                                    "是否删除该行信息？",
+                                    "确认删除",
+                                    JOptionPane.YES_NO_OPTION
+                            );
+
+                            if (confirm == JOptionPane.YES_OPTION) {
+                                // 执行删除操作
+                                SwingWorker<Boolean, Void> deleteWorker = new SwingWorker<Boolean, Void>() {
+                                    @Override
+                                    protected Boolean doInBackground() throws Exception {
+                                        return deleteRowFromDatabase(tableName, model, modelRow, primaryKeys, originalRow);
+                                    }
+
+                                    @Override
+                                    protected void done() {
+                                        try {
+                                            if (get()) {
+                                                // 删除成功：从模型和原始数据中移除
+                                                model.removeRow(modelRow);
+                                                originalData.remove(modelRow);
+                                            } else {
+                                                // 删除失败：恢复原始值
+                                                model.setValueAt(originalRow.get(modelCol), modelRow, modelCol);
+                                                JOptionPane.showMessageDialog(
+                                                        editFrame,
+                                                        "删除失败！请检查数据约束。",
+                                                        "删除错误",
+                                                        JOptionPane.ERROR_MESSAGE
+                                                );
+                                            }
+                                        } catch (Exception ex) {
+                                            ex.printStackTrace();
+                                        }
+                                    }
+                                };
+                                deleteWorker.execute();
+                                return; // 跳过更新逻辑
+                            } else {
+                                // 用户取消删除：恢复原始值
+                                model.setValueAt(originalRow.get(modelCol), modelRow, modelCol);
+                                return;
+                            }
+                        }
+                    }
+
+                    // 原有更新逻辑（非主键列修改或主键列非清空情况）
                     SwingWorker<Boolean, Void> updateWorker = new SwingWorker<Boolean, Void>() {
                         @Override
                         protected Boolean doInBackground() throws Exception {
-                            // 传递原始行数据
                             return updateDatabase(tableName, model, modelRow, modelCol,
                                     newValue, primaryKeys, originalRow);
                         }
@@ -1224,7 +1273,8 @@ public class system {
                         protected void done() {
                             try {
                                 if (!get()) {
-                                    // ... [原有错误处理] ...
+                                    // 更新失败恢复原始值
+                                    model.setValueAt(originalRow.get(modelCol), modelRow, modelCol);
                                 } else {
                                     // 更新成功后更新原始数据
                                     for (int i = 0; i < model.getColumnCount(); i++) {
@@ -1240,6 +1290,65 @@ public class system {
                 }
             }
         });
+    }
+
+    // 添加删除数据库行的方法
+    private static boolean deleteRowFromDatabase(String tableName, DefaultTableModel model,
+                                                 int row, Vector<String> primaryKeys,
+                                                 Vector<Object> originalRow) {
+        // 构建WHERE子句（使用原始主键值）
+        StringBuilder whereClause = new StringBuilder();
+        Vector<Object> primaryKeyValues = new Vector<>();
+
+        for (String pk : primaryKeys) {
+            int pkCol = -1;
+            for (int i = 0; i < model.getColumnCount(); i++) {
+                if (model.getColumnName(i).equals(pk)) {
+                    pkCol = i;
+                    break;
+                }
+            }
+
+            if (pkCol != -1) {
+                Object pkValue = originalRow.get(pkCol);
+                primaryKeyValues.add(pkValue);
+
+                if (whereClause.length() > 0) {
+                    whereClause.append(" AND ");
+                }
+                whereClause.append(pk).append(" = ?");
+            }
+        }
+
+        if (whereClause.length() == 0) {
+            JOptionPane.showMessageDialog(null,
+                    "无法确定主键条件，删除失败",
+                    "删除错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        // 构建SQL
+        String sql = "DELETE FROM " + tableName + " WHERE " + whereClause;
+
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            // 设置主键参数（使用原始值）
+            for (int i = 0; i < primaryKeyValues.size(); i++) {
+                pstmt.setObject(i + 1, primaryKeyValues.get(i));
+            }
+
+            int rowsAffected = pstmt.executeUpdate();
+            return rowsAffected > 0;
+
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(null,
+                    "删除失败: " + ex.getMessage(),
+                    "数据库错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
     }
 
     /**
@@ -1795,7 +1904,7 @@ public class system {
         resultFrame.setVisible(true);
     }
 
-    /**
+     /**
      * 新增方法：查询学生学分信息
      */
     private static void queryCredits() {
@@ -2155,6 +2264,13 @@ public class system {
         JScrollPane scrollPane = new JScrollPane(table);
         mainPanel.add(scrollPane, BorderLayout.CENTER);
 
+        // === 新增：删除按钮区域 ===
+        JPanel deletePanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        JButton deleteButton = new JButton("删除数据");
+        deleteButton.setFont(new Font("微软雅黑", Font.BOLD, 16));
+        deletePanel.add(deleteButton);
+        mainPanel.add(deletePanel, BorderLayout.SOUTH);
+
         // 添加状态标签
         JLabel statusLabel = new JLabel("正在加载数据...");
         statusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
@@ -2162,6 +2278,19 @@ public class system {
 
         tableFrame.add(mainPanel);
         tableFrame.setVisible(true);
+
+        // 获取主键信息
+        final Vector<String> primaryKeys = new Vector<>();
+        try (Connection conn = DriverManager.getConnection(savedJdbcUrl, savedUsername, savedPassword)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            try (ResultSet pkResult = metaData.getPrimaryKeys(null, null, tableName)) {
+                while (pkResult.next()) {
+                    primaryKeys.add(pkResult.getString("COLUMN_NAME"));
+                }
+            }
+        } catch (SQLException ex) {
+            statusLabel.setText("获取主键失败: " + ex.getMessage());
+        }
 
         // 使用SwingWorker在后台加载数据
         SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
@@ -2214,7 +2343,10 @@ public class system {
             }
         };
 
+
         worker.execute();
+
+
     }
 
     /**
